@@ -31,8 +31,35 @@
 namespace jxl {
 namespace {
 
+Status WritePFM(const ImageF& image, const std::string& filename) {
+
+  size_t len = strlen(filename.c_str());
+  if (len < 4 || strncmp(".pfm", filename.c_str() + len - 4, 4) != 0) {
+    printf("wrong file extension; it should be .pfm. loc 1\n");
+    return false;
+  }
+  FILE *fh = fopen(filename.c_str(), "wb");
+  if (fh == NULL) {
+    printf("unable to open file for writing. loc 2\n");
+    return false;
+  }
+
+  // negative scale for little endian
+  fprintf(fh, "Pf\n%d %d\n-1.0\n", (int)image.xsize(), (int)image.ysize());
+
+  for (int y = (int)image.ysize() - 1; y >= 0; --y)
+  {
+    if (fwrite(image.ConstRow(y), 4, image.xsize(), fh) != image.xsize()) {
+      printf("Error writing to file. loc 3\n");
+      return false;
+    }
+  }
+
+  return true;
+}
+
 Status WriteImage(Image3F&& image, const std::string& filename) {
-  ThreadPoolInternal pool(4);
+  ThreadPoolInternal pool(1);
   CodecInOut io;
   io.metadata.m.SetUintSamples(8);
   io.metadata.m.color_encoding = ColorEncoding::SRGB();
@@ -43,6 +70,7 @@ Status WriteImage(Image3F&& image, const std::string& filename) {
 Status RunButteraugli(const char* pathname1, const char* pathname2,
                       const std::string& distmap_filename,
                       const std::string& raw_distmap_filename,
+                      const std::string& pfm_distmap_filename,
                       const std::string& colorspace_hint, double p,
                       float intensity_target) {
   extras::ColorHints color_hints;
@@ -51,7 +79,7 @@ Status RunButteraugli(const char* pathname1, const char* pathname2,
   }
 
   CodecInOut io1;
-  ThreadPoolInternal pool(4);
+  ThreadPoolInternal pool(1);
   if (!SetFromFile(pathname1, color_hints, &io1, &pool)) {
     fprintf(stderr, "Failed to read image from %s\n", pathname1);
     return false;
@@ -92,6 +120,11 @@ Status RunButteraugli(const char* pathname1, const char* pathname2,
     JXL_CHECK(
         WriteImage(CreateHeatMapImage(distmap, good, bad), distmap_filename));
   }
+
+  if (!pfm_distmap_filename.empty()) {
+    JXL_CHECK(WritePFM(distmap, pfm_distmap_filename));
+  }
+
   if (!raw_distmap_filename.empty()) {
     FILE* out = fopen(raw_distmap_filename.c_str(), "w");
     JXL_CHECK(out != nullptr);
@@ -114,6 +147,7 @@ int main(int argc, char** argv) {
             "Usage: %s <reference> <distorted>\n"
             "  [--distmap <distmap>]\n"
             "  [--rawdistmap <distmap.pfm>]\n"
+            "  [--pfm_distance <pfm_filename>]\n"
             "  [--intensity_target <intensity_target>]\n"
             "  [--colorspace <colorspace_hint>]\n"
             "  [--pnorm <pth norm>]\n"
@@ -127,6 +161,7 @@ int main(int argc, char** argv) {
   }
   std::string distmap;
   std::string raw_distmap;
+  std::string pfm_distmap;
   std::string colorspace;
   double p = 3;
   float intensity_target = 80.0;  // sRGB intensity target.
@@ -135,6 +170,8 @@ int main(int argc, char** argv) {
       distmap = argv[++i];
     } else if (std::string(argv[i]) == "--rawdistmap" && i + 1 < argc) {
       raw_distmap = argv[++i];
+    } else if (std::string(argv[i]) == "--pfm-distance" && i + 1 < argc) {
+      pfm_distmap = argv[++i];
     } else if (std::string(argv[i]) == "--colorspace" && i + 1 < argc) {
       colorspace = argv[++i];
     } else if (std::string(argv[i]) == "--intensity_target" && i + 1 < argc) {
@@ -152,8 +189,8 @@ int main(int argc, char** argv) {
     }
   }
 
-  return jxl::RunButteraugli(argv[1], argv[2], distmap, raw_distmap, colorspace,
-                             p, intensity_target)
+  return jxl::RunButteraugli(argv[1], argv[2], distmap, raw_distmap, pfm_distmap,
+                             colorspace, p, intensity_target)
              ? 0
              : 1;
 }
